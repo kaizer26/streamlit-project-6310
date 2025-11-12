@@ -15,11 +15,26 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
 
 # === Konfigurasi dasar ===
+KEY_ID = '687e204db62094de46edbcd7ed7cb204'
 CACHE_DIR = "cached_data"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # === Helper: caching sederhana ===
 @st.cache_data
+def getReq(url):
+    """Ambil data dari URL dan kembalikan hasil JSON jika sukses, None jika gagal."""
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return data
+        else:
+            print(f"Gagal mengambil data: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"Terjadi error saat request: {e}")
+        return None
+
 def cached_dataframe(name: str):
     path = os.path.join(CACHE_DIR, name)
     if os.path.exists(path):
@@ -51,14 +66,16 @@ def safe_request(url, headers, max_retries=3, timeout=15):
         time.sleep(2 * (attempt + 1))
     return None
 
-def ambil_detail_kegiatan(row, headers):
+# === Fungsi ambil_detail_kegiatan dengan kode wilayah dinamis ===
+def ambil_detail_kegiatan(row, headers, kode_prov, kode_kab):
     kd_survei = row['kd_survei']
     id_keg = row['id_keg']
     nama_survei = row['nama_survei']
     nama_keg = row['nama_keg']
-    url = f'https://mitra-api.bps.go.id/api/mitra/listv3/{kd_survei}/{id_keg}/63/10'
 
+    url = f'https://mitra-api.bps.go.id/api/mitra/listv3/{kd_survei}/{id_keg}/{kode_prov}/{kode_kab}'
     resp = safe_request(url, headers)
+
     if resp and resp.status_code == 200 and resp.json():
         res = resp.json()
         detail = pd.json_normalize(res)
@@ -69,15 +86,17 @@ def ambil_detail_kegiatan(row, headers):
         return detail
     return pd.DataFrame()
 
-def ambil_kegiatan(row, headers):
+
+# === Fungsi ambil_kegiatan dengan kode wilayah dinamis ===
+def ambil_kegiatan(row, headers, kode_prov, kode_kab):
     kode_keg = row['kd_survei']
     status_survei = row['status survei']
     nama_survei = row['nama']
 
     urls = [
-        {'url': f'https://mitra-api.bps.go.id/api/keg/list/ks/{kode_keg}/2/0/1?p=63&k=10', 'status': "Belum Mulai"},
-        {'url': f'https://mitra-api.bps.go.id/api/keg/list/ks/{kode_keg}/2/0/2?p=63&k=10', 'status': "Aktif"},
-        {'url': f'https://mitra-api.bps.go.id/api/keg/list/ks/{kode_keg}/2/0/3?p=63&k=10', 'status': "Selesai"}
+        {'url': f'https://mitra-api.bps.go.id/api/keg/list/ks/{kode_keg}/2/0/1?p={kode_prov}&k={kode_kab}', 'status': "Belum Mulai"},
+        {'url': f'https://mitra-api.bps.go.id/api/keg/list/ks/{kode_keg}/2/0/2?p={kode_prov}&k={kode_kab}', 'status': "Aktif"},
+        {'url': f'https://mitra-api.bps.go.id/api/keg/list/ks/{kode_keg}/2/0/3?p={kode_prov}&k={kode_kab}', 'status': "Selesai"}
     ]
 
     semua_kegiatan = []
@@ -98,6 +117,7 @@ def ambil_kegiatan(row, headers):
     if semua_kegiatan:
         return pd.concat(semua_kegiatan, ignore_index=True)
     return pd.DataFrame()
+
 
 # === Fungsi login ===
 def login_sso(username, password):
@@ -166,8 +186,9 @@ if st.button("♻️ Reset Cache & Mulai Ulang"):
     for key in ["token", "survei_df", "kegiatan_df", "mitra_df", "last_selected"]:
         if key in st.session_state:
             del st.session_state[key]
-    st.warning("Cache dihapus, silakan jalankan ulang scraping.")
-    st.stop()
+    st.warning("🧹 Semua cache & sesi login dihapus. Halaman akan dimuat ulang...")
+    time.sleep(1)   
+    st.rerun()  # versi baru pengganti st.experimental_rerun()
 
 # === LOGIN HANDLER ===
 if "token" not in st.session_state:
@@ -176,6 +197,39 @@ if "token" not in st.session_state:
 if st.session_state["token"]:
     st.success("✅ Token login tersedia.")
 else:
+    # Pilih Domain SSO
+    st.subheader("🔐 Login SSO BPS")
+    
+    # === Ambil daftar domain dari API ===
+    list_domain = getReq(f"https://webapi.bps.go.id/v1/api/domain/type/all/key/{KEY_ID}/")
+
+    # pastikan hasilnya DataFrame atau list berisi 4 digit kode wilayah
+    if list_domain and 'data' in list_domain:
+        domain_df = pd.DataFrame(list_domain['data'][1])
+        # ambil hanya kolom kode (4 digit)
+        domain_codes = domain_df['domain_id'].tolist()  # sesuai struktur yang kamu sebut
+    else:
+        domain_codes = ['6310']  # default fallback
+
+    # === Pilihan domain ===
+    default_domain = "6310"
+
+    # cari posisi default domain di list (jika ada)
+    if default_domain in domain_codes:
+        default_index = domain_codes.index(default_domain)
+    else:
+        default_index = 0  # fallback kalau 6310 tidak ditemukan
+
+    domain = st.selectbox("Pilih Domain (kode wilayah)", domain_codes, index=default_index)
+
+    # pecah domain jadi 2 bagian: provinsi dan kabupaten
+    kode_prov = domain[:2]
+    kode_kab = domain[2:]
+
+    # simpan di session_state supaya tetap ada setelah reload
+    st.session_state["kode_prov"] = kode_prov
+    st.session_state["kode_kab"] = kode_kab
+
     username = st.text_input("👤 Username SSO")
     password = st.text_input("🔒 Password SSO", type="password")
     if st.button("🚀 Login & Jalankan Scraping"):
@@ -215,71 +269,70 @@ if "survei_df" not in st.session_state:
 survei_df = st.session_state["survei_df"]
 st.success(f"📦 Ditemukan {len(survei_df)} survei.")
 
-# === AMBIL DATA KEGIATAN ===
-if "kegiatan_df" not in st.session_state:
-    kegiatan_df = cached_dataframe("list_kegiatan.xlsx")
-    if kegiatan_df.empty:
-        progress = st.progress(0)
-        list_all_survey = []
-        total = len(survei_df)
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(ambil_kegiatan, row, headers): idx for idx, row in survei_df.iterrows()}
-            for i, future in enumerate(as_completed(futures)):
-                result = future.result()
-                if not result.empty:
-                    list_all_survey.append(result)
-                progress.progress((i + 1) / total)
-        kegiatan_df = pd.concat(list_all_survey, ignore_index=True)
-        save_cache(kegiatan_df, "list_kegiatan.xlsx")
-    st.session_state["kegiatan_df"] = kegiatan_df
+# === PILIH SURVEI ===
+st.subheader("📌 Pilih Survei")
 
-kegiatan_df = st.session_state["kegiatan_df"]
-st.success(f"✅ {len(kegiatan_df)} kegiatan berhasil diambil.")
-
-# === PILIH KEGIATAN ===
-st.subheader("📌 Pilih Kegiatan")
-
-if not kegiatan_df.empty:
-    kegiatan_df['label_kegiatan'] = (
-        kegiatan_df['nama_survei'] + " — " +
-        kegiatan_df['nama_keg'] + " (" + kegiatan_df['status kegiatan'] + ")"
-    )
-
-    pilihan = st.selectbox(
-        "Pilih salah satu kegiatan:",
-        options=kegiatan_df['label_kegiatan'].unique(),
+if not survei_df.empty:
+    pilihan_survei = st.selectbox(
+        "Pilih salah satu survei:",
+        options=survei_df['nama'].unique(),
         index=None,
-        key="pilihan_kegiatan",
-        placeholder="Pilih kegiatan untuk melihat daftar mitra..."
+        placeholder="Pilih survei untuk melihat daftar kegiatan..."
     )
 
-    if pilihan:
-        selected_row = kegiatan_df[kegiatan_df['label_kegiatan'] == pilihan].iloc[0]
-        st.info(f"📄 Menampilkan mitra untuk: **{selected_row['nama_survei']} - {selected_row['nama_keg']}**")
+    if pilihan_survei:
+        selected_survei = survei_df[survei_df['nama'] == pilihan_survei].iloc[0]
+        # st.info(f"📄 Mengambil kegiatan untuk survei: **{selected_survei['nama']}**")
 
-        if "mitra_df" not in st.session_state or st.session_state.get("last_selected") != pilihan:
-            with st.spinner("🔍 Mengambil daftar mitra..."):
-                detail_df = ambil_detail_kegiatan(selected_row, headers)
-                st.session_state["mitra_df"] = detail_df
-                st.session_state["last_selected"] = pilihan
-        else:
-            detail_df = st.session_state["mitra_df"]
+        # Ambil kegiatan HANYA untuk survei ini
+        with st.spinner("🔍 Mengambil daftar kegiatan..."):
+            kegiatan_df = ambil_kegiatan(selected_survei, headers, 
+    st.session_state.get("kode_prov", "63"), 
+    st.session_state.get("kode_kab", "10"))
 
-        if not detail_df.empty:
-            st.success(f"🎯 Total {len(detail_df)} mitra ditemukan.")
-            st.dataframe(detail_df)
-
-            tanggalsekarang = time.strftime("%Y%m%d")
-            filename = f"{tanggalsekarang} - Daftar Mitra - {selected_row['nama_keg']}.xlsx"
-            detail_df.to_excel(filename, index=False)
-
-            st.download_button(
-                label="💾 Download Daftar Mitra",
-                data=open(filename, "rb"),
-                file_name=filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if not kegiatan_df.empty:
+            # st.success(f"✅ Ditemukan {len(kegiatan_df)} kegiatan untuk survei {selected_survei['nama']}.")
+            
+            kegiatan_df['label_kegiatan'] = (
+                kegiatan_df['nama_keg'] + " (" + kegiatan_df['status kegiatan'] + ")"
             )
+
+            pilihan_kegiatan = st.selectbox(
+                "Pilih kegiatan:",
+                options=kegiatan_df['label_kegiatan'].unique(),
+                index=None,
+                key="pilihan_kegiatan",
+                placeholder="Pilih kegiatan untuk melihat daftar mitra..."
+            )
+
+            if pilihan_kegiatan:
+                selected_row = kegiatan_df[kegiatan_df['label_kegiatan'] == pilihan_kegiatan].iloc[0]
+                # st.info(f"📄 Mengambil mitra untuk kegiatan: **{selected_row['nama_keg']}**")
+
+                with st.spinner("🧩 Mengambil daftar mitra..."):
+                    detail_df = ambil_detail_kegiatan(selected_row, headers, 
+    st.session_state.get("kode_prov", "63"), 
+    st.session_state.get("kode_kab", "10"))
+
+                if not detail_df.empty:
+                    st.dataframe(detail_df)
+                    st.success(f"🎯 Total {len(detail_df)} mitra ditemukan.")
+
+                    tanggalsekarang = time.strftime("%Y%m%d")
+                    filename = f"{tanggalsekarang} - Daftar Mitra - {selected_row['nama_keg']}.xlsx"
+                    detail_df.to_excel(filename, index=False)
+
+                    st.download_button(
+                        label="💾 Download Daftar Mitra",
+                        data=open(filename, "rb"),
+                        file_name=filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                else:
+                    st.warning("❌ Tidak ada mitra untuk kegiatan ini.")
         else:
-            st.warning("❌ Tidak ada mitra untuk kegiatan ini.")
+            st.warning("🚫 Tidak ditemukan kegiatan untuk survei ini.")
 else:
-    st.warning("Belum ada data kegiatan untuk ditampilkan.")
+    st.warning("Belum ada data survei untuk ditampilkan.")
+
+    
