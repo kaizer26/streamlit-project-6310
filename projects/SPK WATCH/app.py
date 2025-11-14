@@ -66,9 +66,13 @@ if st.button("▶️ Proses Data"):
             try:
                 if uploaded_file:
                     df = pd.read_excel(uploaded_file, sheet_name=sheet, dtype={"NIK": str})
+                # else:
+                #     # csv_url = f"{sheet_url}/gviz/tq?tqx=out:csv&sheet={sheet.replace(' ', '%20')}"
+                #     csv_url = f"{sheet_url}/export?format=csv&gid="
+                #     df = pd.read_csv(csv_url, dtype={"NIK": str})
                 else:
-                    # csv_url = f"{sheet_url}/gviz/tq?tqx=out:csv&sheet={sheet.replace(' ', '%20')}"
-                    csv_url = f"{sheet_url}/export?format=csv&gid="
+                    sheet_encoded = quote(sheet)
+                    csv_url = f"{sheet_url}/gviz/tq?tqx=out:csv&sheet={sheet_encoded}"
                     df = pd.read_csv(csv_url, dtype={"NIK": str})
                 
                 df.columns = df.columns.astype(str)
@@ -441,476 +445,476 @@ else:
 
 
 
-# === Laporan Kegiatan Mitra per Bulan (PDF) ===
-import io
-from datetime import datetime
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet
+# # === Laporan Kegiatan Mitra per Bulan (PDF) ===
+# import io
+# from datetime import datetime
+# from reportlab.lib.pagesizes import A4
+# from reportlab.lib import colors
+# from reportlab.lib.units import mm
+# from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+# from reportlab.lib.styles import getSampleStyleSheet
 
-st.markdown("---")
-st.subheader("📄 Laporan PDF: Kegiatan Mitra per Bulan")
-styles = getSampleStyleSheet()
-styleN = styles["Normal"]
+# st.markdown("---")
+# st.subheader("📄 Laporan PDF: Kegiatan Mitra per Bulan")
+# styles = getSampleStyleSheet()
+# styleN = styles["Normal"]
 
 
-# Pastikan data kegiatan ada
-if "df_final" not in st.session_state or st.session_state["df_final"].empty:
-    st.info("Belum ada data kegiatan. Klik ▶️ Proses Data terlebih dahulu.")
-else:
-    df_all = st.session_state["df_final"].copy()
+# # Pastikan data kegiatan ada
+# if "df_final" not in st.session_state or st.session_state["df_final"].empty:
+#     st.info("Belum ada data kegiatan. Klik ▶️ Proses Data terlebih dahulu.")
+# else:
+#     df_all = st.session_state["df_final"].copy()
 
-    # (Opsional) DB Mitra untuk identitas lebih lengkap
-    df_db = st.session_state.get("df_mitra", None)
-    if df_db is None and "df_mitra_belum" in st.session_state:
-        # tidak ideal, tapi coba ambil struktur dari df_mitra_belum jika user belum simpan df_mitra
-        df_db = st.session_state["df_mitra_belum"].copy()
+#     # (Opsional) DB Mitra untuk identitas lebih lengkap
+#     df_db = st.session_state.get("df_mitra", None)
+#     if df_db is None and "df_mitra_belum" in st.session_state:
+#         # tidak ideal, tapi coba ambil struktur dari df_mitra_belum jika user belum simpan df_mitra
+#         df_db = st.session_state["df_mitra_belum"].copy()
 
-    # Pilih bulan/sheet
-    sheet_opts = sorted(df_all["Sumber Sheet"].dropna().astype(str).unique().tolist())
-    bulan = st.selectbox("📅 Pilih Bulan/Sheet untuk laporan:", sheet_opts, index=0 if sheet_opts else None)
+#     # Pilih bulan/sheet
+#     sheet_opts = sorted(df_all["Sumber Sheet"].dropna().astype(str).unique().tolist())
+#     bulan = st.selectbox("📅 Pilih Bulan/Sheet untuk laporan:", sheet_opts, index=0 if sheet_opts else None)
 
-    # (Opsional) filter kegiatan tertentu atau semua
-    df_bulan = df_all[df_all["Sumber Sheet"] == bulan].copy()
-    keg_opts1 = ["(Semua)"] + sorted(df_bulan["Kegiatan"].dropna().astype(str).unique().tolist())
-    pilih_kegiatan1 = st.selectbox("🗂️ Pilih Kegiatan (opsional):", keg_opts1, index=0)
+#     # (Opsional) filter kegiatan tertentu atau semua
+#     df_bulan = df_all[df_all["Sumber Sheet"] == bulan].copy()
+#     keg_opts1 = ["(Semua)"] + sorted(df_bulan["Kegiatan"].dropna().astype(str).unique().tolist())
+#     pilih_kegiatan1 = st.selectbox("🗂️ Pilih Kegiatan (opsional):", keg_opts1, index=0)
 
-    if pilih_kegiatan1 != "(Semua)":
-        df_bulan = df_bulan[df_bulan["Kegiatan"].astype(str) == pilih_kegiatan1]
+#     if pilih_kegiatan1 != "(Semua)":
+#         df_bulan = df_bulan[df_bulan["Kegiatan"].astype(str) == pilih_kegiatan1]
 
-    # Normalisasi kolom yang digunakan
-    if "Nilai" in df_bulan.columns:
-        df_bulan["Nilai"] = pd.to_numeric(df_bulan["Nilai"], errors="coerce").fillna(0)
+#     # Normalisasi kolom yang digunakan
+#     if "Nilai" in df_bulan.columns:
+#         df_bulan["Nilai"] = pd.to_numeric(df_bulan["Nilai"], errors="coerce").fillna(0)
 
-    # Tentukan kunci identitas utama (NIK kalau ada, fallback Nama)
-    use_nik = "NIK" in df_bulan.columns and df_bulan["NIK"].notna().any()
-    key_col = "NIK" if use_nik else "Nama"
+#     # Tentukan kunci identitas utama (NIK kalau ada, fallback Nama)
+#     use_nik = "NIK" in df_bulan.columns and df_bulan["NIK"].notna().any()
+#     key_col = "NIK" if use_nik else "Nama"
 
-    # UI: bisa pilih subset mitra (opsional)
-    daftar_mitra = sorted(df_bulan[key_col].dropna().astype(str).unique().tolist())
-    pilih_mitra = st.multiselect(f"👥 Pilih {key_col} untuk dibikinkan laporan (kosongkan untuk semua):", daftar_mitra, default=[])
+#     # UI: bisa pilih subset mitra (opsional)
+#     daftar_mitra = sorted(df_bulan[key_col].dropna().astype(str).unique().tolist())
+#     pilih_mitra = st.multiselect(f"👥 Pilih {key_col} untuk dibikinkan laporan (kosongkan untuk semua):", daftar_mitra, default=[])
 
-    # Tombol generate
-    if st.button("🧾 Buat PDF Laporan"):
-        if df_bulan.empty:
-            st.warning("Tidak ada entri pada filter ini.")
-        else:
-            # Siapkan lookup identitas dari DB Mitra (berdasarkan NIK atau Nama)
-            def norm_nik(x):
-                if pd.isna(x): return ""
-                return str(x).strip().replace(" ", "")
+#     # Tombol generate
+#     if st.button("🧾 Buat PDF Laporan"):
+#         if df_bulan.empty:
+#             st.warning("Tidak ada entri pada filter ini.")
+#         else:
+#             # Siapkan lookup identitas dari DB Mitra (berdasarkan NIK atau Nama)
+#             def norm_nik(x):
+#                 if pd.isna(x): return ""
+#                 return str(x).strip().replace(" ", "")
 
-            def norm_nama(x):
-                if pd.isna(x): return ""
-                return " ".join(str(x).strip().split()).upper()
+#             def norm_nama(x):
+#                 if pd.isna(x): return ""
+#                 return " ".join(str(x).strip().split()).upper()
 
-            mitra_lookup = {}
-            if df_db is not None and not df_db.empty:
-                # siapkan kolom standar
-                for alt, std in [("nama_lengkap", "nama_lengkap"), ("nik", "nik"),
-                                 ("nama_pos", "nama_pos"), ("email", "email"),
-                                 ("alamat_kec", "alamat_kec"), ("alamat_desa", "alamat_desa"),
-                                 ("tgl_lahir", "tgl_lahir"), ("notelp", "notelp")]:
-                    if alt not in df_db.columns:
-                        # coba mapping alternatif dari versi sebelumnya
-                        if alt == "nik" and "NIK" in df_db.columns: df_db.rename(columns={"NIK": "nik"}, inplace=True)
-                        if alt == "nama_lengkap" and "Nama" in df_db.columns: df_db.rename(columns={"Nama": "nama_lengkap"}, inplace=True)
+#             mitra_lookup = {}
+#             if df_db is not None and not df_db.empty:
+#                 # siapkan kolom standar
+#                 for alt, std in [("nama_lengkap", "nama_lengkap"), ("nik", "nik"),
+#                                  ("nama_pos", "nama_pos"), ("email", "email"),
+#                                  ("alamat_kec", "alamat_kec"), ("alamat_desa", "alamat_desa"),
+#                                  ("tgl_lahir", "tgl_lahir"), ("notelp", "notelp")]:
+#                     if alt not in df_db.columns:
+#                         # coba mapping alternatif dari versi sebelumnya
+#                         if alt == "nik" and "NIK" in df_db.columns: df_db.rename(columns={"NIK": "nik"}, inplace=True)
+#                         if alt == "nama_lengkap" and "Nama" in df_db.columns: df_db.rename(columns={"Nama": "nama_lengkap"}, inplace=True)
 
-                # index by nik kalau ada, else by nama_lengkap
-                if "nik" in df_db.columns and df_db["nik"].notna().any():
-                    df_db["_key"] = df_db["nik"].map(norm_nik)
-                elif "nama_lengkap" in df_db.columns:
-                    df_db["_key"] = df_db["nama_lengkap"].map(norm_nama)
-                else:
-                    df_db["_key"] = ""
+#                 # index by nik kalau ada, else by nama_lengkap
+#                 if "nik" in df_db.columns and df_db["nik"].notna().any():
+#                     df_db["_key"] = df_db["nik"].map(norm_nik)
+#                 elif "nama_lengkap" in df_db.columns:
+#                     df_db["_key"] = df_db["nama_lengkap"].map(norm_nama)
+#                 else:
+#                     df_db["_key"] = ""
 
-                for _, r in df_db.iterrows():
-                    mitra_lookup[str(r.get("_key", ""))] = {
-                        "nama_lengkap": r.get("nama_lengkap", ""),
-                        "nik": r.get("nik", ""),
-                        "nama_pos": r.get("nama_pos", ""),
-                        "email": r.get("email", ""),
-                        "alamat_kec": r.get("alamat_kec", ""),
-                        "alamat_desa": r.get("alamat_desa", ""),
-                        "tgl_lahir": r.get("tgl_lahir", ""),
-                        "notelp": r.get("notelp", ""),
-                    }
+#                 for _, r in df_db.iterrows():
+#                     mitra_lookup[str(r.get("_key", ""))] = {
+#                         "nama_lengkap": r.get("nama_lengkap", ""),
+#                         "nik": r.get("nik", ""),
+#                         "nama_pos": r.get("nama_pos", ""),
+#                         "email": r.get("email", ""),
+#                         "alamat_kec": r.get("alamat_kec", ""),
+#                         "alamat_desa": r.get("alamat_desa", ""),
+#                         "tgl_lahir": r.get("tgl_lahir", ""),
+#                         "notelp": r.get("notelp", ""),
+#                     }
 
-            # Kelompokkan per mitra
-            df_bulan["_key_mitra"] = df_bulan[key_col].astype(str)
-            if key_col == "NIK":
-                df_bulan["_key_norm"] = df_bulan["_key_mitra"].map(norm_nik)
-            else:
-                df_bulan["_key_norm"] = df_bulan["_key_mitra"].map(norm_nama)
+#             # Kelompokkan per mitra
+#             df_bulan["_key_mitra"] = df_bulan[key_col].astype(str)
+#             if key_col == "NIK":
+#                 df_bulan["_key_norm"] = df_bulan["_key_mitra"].map(norm_nik)
+#             else:
+#                 df_bulan["_key_norm"] = df_bulan["_key_mitra"].map(norm_nama)
 
-            # Filter subset mitra jika dipilih
-            if pilih_mitra:
-                pilih_set = set([str(x) for x in pilih_mitra])
-                df_bulan = df_bulan[df_bulan["_key_mitra"].isin(pilih_set)]
+#             # Filter subset mitra jika dipilih
+#             if pilih_mitra:
+#                 pilih_set = set([str(x) for x in pilih_mitra])
+#                 df_bulan = df_bulan[df_bulan["_key_mitra"].isin(pilih_set)]
 
-            grouped = df_bulan.sort_values([key_col, "Jadwal", "Kegiatan"]).groupby("_key_norm")
+#             grouped = df_bulan.sort_values([key_col, "Jadwal", "Kegiatan"]).groupby("_key_norm")
 
-            # ==== Bangun PDF ====
-            buffer = io.BytesIO()
-            doc = SimpleDocTemplate(
-                buffer,
-                pagesize=A4,
-                leftMargin=18*mm, rightMargin=18*mm, topMargin=16*mm, bottomMargin=16*mm
-            )
+#             # ==== Bangun PDF ====
+#             buffer = io.BytesIO()
+#             doc = SimpleDocTemplate(
+#                 buffer,
+#                 pagesize=A4,
+#                 leftMargin=18*mm, rightMargin=18*mm, topMargin=16*mm, bottomMargin=16*mm
+#             )
             
-            story = []
+#             story = []
 
-            def fmt_rp(x):
-                try:
-                    return f"Rp{int(x):,}".replace(",", ".")
-                except:
-                    try:
-                        return f"Rp{float(x):,.0f}".replace(",", ".")
-                    except:
-                        return str(x)
+#             def fmt_rp(x):
+#                 try:
+#                     return f"Rp{int(x):,}".replace(",", ".")
+#                 except:
+#                     try:
+#                         return f"Rp{float(x):,.0f}".replace(",", ".")
+#                     except:
+#                         return str(x)
 
-            def fmt_tgl(x):
-                # terima string / datetime; kembalikan "dd-mm-yyyy"
-                try:
-                    t = pd.to_datetime(x, errors="coerce")
-                    if pd.isna(t): return str(x)
-                    return t.strftime("%d-%m-%Y")
-                except:
-                    return str(x)
+#             def fmt_tgl(x):
+#                 # terima string / datetime; kembalikan "dd-mm-yyyy"
+#                 try:
+#                     t = pd.to_datetime(x, errors="coerce")
+#                     if pd.isna(t): return str(x)
+#                     return t.strftime("%d-%m-%Y")
+#                 except:
+#                     return str(x)
 
-            def umur_from_tgl(tgl):
-                if tgl in [None, "", float("nan")]: return ""
-                t = pd.to_datetime(tgl, errors="coerce")
-                if pd.isna(t): return ""
-                today = datetime.today().date()
-                return today.year - t.year - ((today.month, today.day) < (t.month, t.day))
+#             def umur_from_tgl(tgl):
+#                 if tgl in [None, "", float("nan")]: return ""
+#                 t = pd.to_datetime(tgl, errors="coerce")
+#                 if pd.isna(t): return ""
+#                 today = datetime.today().date()
+#                 return today.year - t.year - ((today.month, today.day) < (t.month, t.day))
 
-            def wa_text(no):
-                if not no: return ""
-                digits = "".join(c for c in str(no) if c.isdigit())
-                if not digits: return ""
-                if digits.startswith("0"):
-                    digits = "62" + digits[1:]
-                elif digits.startswith("8"):
-                    digits = "62" + digits
-                return f"+{digits}" if not digits.startswith("62") else digits
+#             def wa_text(no):
+#                 if not no: return ""
+#                 digits = "".join(c for c in str(no) if c.isdigit())
+#                 if not digits: return ""
+#                 if digits.startswith("0"):
+#                     digits = "62" + digits[1:]
+#                 elif digits.startswith("8"):
+#                     digits = "62" + digits
+#                 return f"+{digits}" if not digits.startswith("62") else digits
 
-            judul = f"Laporan Kegiatan Mitra — {bulan}"
-            story.append(Paragraph(judul, styles["Title"]))
-            story.append(Spacer(1, 6))
+#             judul = f"Laporan Kegiatan Mitra — {bulan}"
+#             story.append(Paragraph(judul, styles["Title"]))
+#             story.append(Spacer(1, 6))
 
-            # urutan kunci agar konsisten
-            keys_urut = sorted(grouped.groups.keys())
+#             # urutan kunci agar konsisten
+#             keys_urut = sorted(grouped.groups.keys())
 
-            for idx, key in enumerate(keys_urut, start=1):
-                df_m = grouped.get_group(key).copy()
+#             for idx, key in enumerate(keys_urut, start=1):
+#                 df_m = grouped.get_group(key).copy()
 
-                # Tentukan identitas (ambil dari DB bila ada)
-                ident = {}
-                if key in mitra_lookup and mitra_lookup[key]:
-                    ident = mitra_lookup[key]
-                else:
-                    # fallback: ambil dari df kegiatan
-                    ident = {
-                        "nama_lengkap": df_m["Nama"].iloc[0] if "Nama" in df_m.columns else "",
-                        "nik": df_m["NIK"].iloc[0] if "NIK" in df_m.columns else "",
-                        "nama_pos": df_m["Asal"].iloc[0] if "Asal" in df_m.columns else "",
-                        "email": "",
-                        "alamat_kec": "",
-                        "alamat_desa": "",
-                        "tgl_lahir": "",
-                        "notelp": "",
-                    }
+#                 # Tentukan identitas (ambil dari DB bila ada)
+#                 ident = {}
+#                 if key in mitra_lookup and mitra_lookup[key]:
+#                     ident = mitra_lookup[key]
+#                 else:
+#                     # fallback: ambil dari df kegiatan
+#                     ident = {
+#                         "nama_lengkap": df_m["Nama"].iloc[0] if "Nama" in df_m.columns else "",
+#                         "nik": df_m["NIK"].iloc[0] if "NIK" in df_m.columns else "",
+#                         "nama_pos": df_m["Asal"].iloc[0] if "Asal" in df_m.columns else "",
+#                         "email": "",
+#                         "alamat_kec": "",
+#                         "alamat_desa": "",
+#                         "tgl_lahir": "",
+#                         "notelp": "",
+#                     }
 
-                # Header identitas
-                meta = [
-                    ["Nama", ident.get("nama_lengkap", "") or df_m.get("Nama", pd.Series([""])).iloc[0]],
-                    ["NIK", ident.get("nik", "")],
-                    ["POS", ident.get("nama_pos", "")],
-                    ["Email", ident.get("email", "")],
-                    ["Alamat", f"{ident.get('alamat_desa','')} - {ident.get('alamat_kec','')}"],
-                ]
-                # umur (jika tersedia tgl_lahir)
-                u = umur_from_tgl(ident.get("tgl_lahir", ""))
-                if u != "":
-                    meta.append(["Umur", f"{u} tahun"])
-                # WA (jika tersedia no telp)
-                w = wa_text(ident.get("notelp", ""))
-                if w:
-                    meta.append(["WhatsApp", w])
+#                 # Header identitas
+#                 meta = [
+#                     ["Nama", ident.get("nama_lengkap", "") or df_m.get("Nama", pd.Series([""])).iloc[0]],
+#                     ["NIK", ident.get("nik", "")],
+#                     ["POS", ident.get("nama_pos", "")],
+#                     ["Email", ident.get("email", "")],
+#                     ["Alamat", f"{ident.get('alamat_desa','')} - {ident.get('alamat_kec','')}"],
+#                 ]
+#                 # umur (jika tersedia tgl_lahir)
+#                 u = umur_from_tgl(ident.get("tgl_lahir", ""))
+#                 if u != "":
+#                     meta.append(["Umur", f"{u} tahun"])
+#                 # WA (jika tersedia no telp)
+#                 w = wa_text(ident.get("notelp", ""))
+#                 if w:
+#                     meta.append(["WhatsApp", w])
 
-                tbl_ident = Table(meta, hAlign="LEFT", colWidths=[35*mm, 120*mm])
-                tbl_ident.setStyle(TableStyle([
-                    ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
-                    ("FONTSIZE", (0,0), (-1,-1), 9),
-                    ("BOTTOMPADDING", (0,0), (-1,-1), 4),
-                ]))
+#                 tbl_ident = Table(meta, hAlign="LEFT", colWidths=[35*mm, 120*mm])
+#                 tbl_ident.setStyle(TableStyle([
+#                     ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
+#                     ("FONTSIZE", (0,0), (-1,-1), 9),
+#                     ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+#                 ]))
 
-                story.append(Paragraph(f"<b>Mitra {idx} / {len(keys_urut)}</b>", styles["Heading3"]))
-                story.append(tbl_ident)
-                story.append(Spacer(1, 4))
+#                 story.append(Paragraph(f"<b>Mitra {idx} / {len(keys_urut)}</b>", styles["Heading3"]))
+#                 story.append(tbl_ident)
+#                 story.append(Spacer(1, 4))
 
-                # Tabel kegiatan
-                cols = ["No", "Tanggal/Jadwal", "Kegiatan", "Volume", "Nilai"]
-                rows = [cols]
-                for i, r in enumerate(df_m.itertuples(index=False), start=1):
-                    jadwal_text = fmt_tgl(getattr(r, "Jadwal", "")) if "Jadwal" in df_m.columns else ""
-                    jadwal = Paragraph(jadwal_text, styleN)   # <<< pakai Paragraph
-                    keg = Paragraph(str(getattr(r, "Kegiatan", "")), styleN)
-                    vol = Paragraph(str(getattr(r, "Volume", "")), styleN)
-                    nilai = fmt_rp(getattr(r, "Nilai", 0)) if "Nilai" in df_m.columns else ""
-                    rows.append([i, jadwal, keg, vol, nilai])
+#                 # Tabel kegiatan
+#                 cols = ["No", "Tanggal/Jadwal", "Kegiatan", "Volume", "Nilai"]
+#                 rows = [cols]
+#                 for i, r in enumerate(df_m.itertuples(index=False), start=1):
+#                     jadwal_text = fmt_tgl(getattr(r, "Jadwal", "")) if "Jadwal" in df_m.columns else ""
+#                     jadwal = Paragraph(jadwal_text, styleN)   # <<< pakai Paragraph
+#                     keg = Paragraph(str(getattr(r, "Kegiatan", "")), styleN)
+#                     vol = Paragraph(str(getattr(r, "Volume", "")), styleN)
+#                     nilai = fmt_rp(getattr(r, "Nilai", 0)) if "Nilai" in df_m.columns else ""
+#                     rows.append([i, jadwal, keg, vol, nilai])
                     
-                # total
-                total_nilai = df_m["Nilai"].sum() if "Nilai" in df_m.columns else 0
-                rows.append(["", "", "", "Total", fmt_rp(total_nilai)])
+#                 # total
+#                 total_nilai = df_m["Nilai"].sum() if "Nilai" in df_m.columns else 0
+#                 rows.append(["", "", "", "Total", fmt_rp(total_nilai)])
 
-                tbl_keg = Table(
-                                    rows,
-                                    hAlign="LEFT",
-                                    colWidths=[12*mm, None, 80*mm, 25*mm, 30*mm]  # kolom ke-2 (Tanggal) auto-wrap
-                                )
-                tbl_keg.setStyle(TableStyle([
-                    ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
-                    ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#f0f0f0")),
-                    ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-                    ("ALIGN", (0,0), (0,-1), "CENTER"),
-                    ("ALIGN", (3,1), (3,-2), "CENTER"),
-                    ("ALIGN", (4,1), (4,-1), "RIGHT"),
-                    ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
-                    ("FONTSIZE", (0,0), (-1,-1), 9),
-                    ("WORDWRAP", (1,1), (1,-1), None),   # kolom Tanggal wrap
-                ]))
-                story.append(tbl_keg)
+#                 tbl_keg = Table(
+#                                     rows,
+#                                     hAlign="LEFT",
+#                                     colWidths=[12*mm, None, 80*mm, 25*mm, 30*mm]  # kolom ke-2 (Tanggal) auto-wrap
+#                                 )
+#                 tbl_keg.setStyle(TableStyle([
+#                     ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+#                     ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#f0f0f0")),
+#                     ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+#                     ("ALIGN", (0,0), (0,-1), "CENTER"),
+#                     ("ALIGN", (3,1), (3,-2), "CENTER"),
+#                     ("ALIGN", (4,1), (4,-1), "RIGHT"),
+#                     ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
+#                     ("FONTSIZE", (0,0), (-1,-1), 9),
+#                     ("WORDWRAP", (1,1), (1,-1), None),   # kolom Tanggal wrap
+#                 ]))
+#                 story.append(tbl_keg)
 
-                # halaman baru per mitra
-                if idx < len(keys_urut):
-                    story.append(PageBreak())
+#                 # halaman baru per mitra
+#                 if idx < len(keys_urut):
+#                     story.append(PageBreak())
 
-            doc.build(story)
+#             doc.build(story)
 
-            pdf_bytes = buffer.getvalue()
-            buffer.close()
+#             pdf_bytes = buffer.getvalue()
+#             buffer.close()
 
-            st.success(f"PDF berhasil dibuat untuk {len(keys_urut)} mitra di bulan {bulan}.")
-            st.download_button(
-                "⬇️ Download PDF Laporan",
-                data=pdf_bytes,
-                file_name=f"Laporan_Kegiatan_Mitra_{bulan.replace(' ','_')}.pdf",
-                mime="application/pdf",
-            )
-
-
-# ====== LAPORAN DOCX BERDASARKAN TEMPLATE WORD ======
-from docxtpl import DocxTemplate
-import zipfile
-
-st.markdown("---")
-st.subheader("📝 Laporan DOCX: Kegiatan Mitra per Bulan (berdasarkan Template Word)")
-
-# Upload template DOCX
-template_file = st.file_uploader("📄 Upload Template Word (.docx) dengan placeholder Jinja", type=["docx"], key="tpl_docx")
-
-# Ambil data yang sudah diproses
-if "df_final" not in st.session_state or st.session_state["df_final"].empty:
-    st.info("Belum ada data kegiatan. Klik ▶️ Proses Data terlebih dahulu.")
-else:
-    df_all = st.session_state["df_final"].copy()
-    df_db = None
-    if "df_mitra" in st.session_state and not st.session_state["df_mitra"].empty:
-        df_db = st.session_state["df_mitra"].copy()
-    elif "df_mitra_belum" in st.session_state and not st.session_state["df_mitra_belum"].empty:
-        df_db = st.session_state["df_mitra_belum"].copy()  # fallback minimal
-
-    # Pilihan bulan/sheet
-    sheet_opts = sorted(df_all["Sumber Sheet"].dropna().astype(str).unique().tolist())
-    bulan = st.selectbox("📅 Pilih Bulan/Sheet:", sheet_opts, index=0 if sheet_opts else None)
-
-    # Filter kegiatan (opsional)
-    df_bulan = df_all[df_all["Sumber Sheet"] == bulan].copy()
-    keg_opts2 = ["(Semua)"] + sorted(df_bulan["Kegiatan"].dropna().astype(str).unique().tolist())
-    pilih_kegiatan2 = st.selectbox("🗂️ Pilih Kegiatan yg Diinginkan (opsional):", keg_opts2, index=0)
-    if pilih_kegiatan2 != "(Semua)":
-        df_bulan = df_bulan[df_bulan["Kegiatan"].astype(str) == pilih_kegiatan2]
-
-    # Normalisasi kolom nilai
-    if "Nilai" in df_bulan.columns:
-        df_bulan["Nilai"] = pd.to_numeric(df_bulan["Nilai"], errors="coerce").fillna(0)
-
-    # Kunci grup: utamakan NIK bila ada, jika tidak ada pakai Nama
-    use_nik = "NIK" in df_bulan.columns and df_bulan["NIK"].notna().any()
-    key_col = "NIK" if use_nik else "Nama"
-
-    # Multiselect mitra
-    daftar_mitra = sorted(df_bulan[key_col].dropna().astype(str).unique().tolist())
-    pilih_mitra = st.multiselect(f"👥 Pilih {key_col} untuk dibuatkan laporan (kosongkan untuk semua):", daftar_mitra, default=[])
-
-    # ===== Helper normalisasi & lookup identitas =====
-    def norm_nik(x):
-        if pd.isna(x): return ""
-        return "".join(c for c in str(x) if c.isdigit())
-
-    def norm_nama(x):
-        if pd.isna(x): return ""
-        return " ".join(str(x).strip().split()).upper()
-
-    def hitung_umur(tgl):
-        t = pd.to_datetime(tgl, errors="coerce")
-        if pd.isna(t): 
-            return ""
-        today = date.today()   # ✅ sekarang bener
-        return today.year - t.year - ((today.month, today.day) < (t.month, t.day))
+#             st.success(f"PDF berhasil dibuat untuk {len(keys_urut)} mitra di bulan {bulan}.")
+#             st.download_button(
+#                 "⬇️ Download PDF Laporan",
+#                 data=pdf_bytes,
+#                 file_name=f"Laporan_Kegiatan_Mitra_{bulan.replace(' ','_')}.pdf",
+#                 mime="application/pdf",
+#             )
 
 
-    def wa_format(no):
-        digits = "".join(c for c in str(no) if c.isdigit())
-        if not digits: return ""
-        if digits.startswith("0"):
-            digits = "62" + digits[1:]
-        elif digits.startswith("8"):
-            digits = "62" + digits
-        return f"https://wa.me/{digits}"
+# # # ====== LAPORAN DOCX BERDASARKAN TEMPLATE WORD ======
+# # from docxtpl import DocxTemplate
+# # import zipfile
 
-    def fmt_rp(x):
-        try:
-            return f"Rp{int(float(x)):,}".replace(",", ".")
-        except:
-            return str(x)
+# # st.markdown("---")
+# # st.subheader("📝 Laporan DOCX: Kegiatan Mitra per Bulan (berdasarkan Template Word)")
 
-    def fmt_tgl(x):
-        t = pd.to_datetime(x, errors="coerce")
-        if pd.isna(t): return str(x)
-        return t.strftime("%d-%m-%Y")
+# # # Upload template DOCX
+# # template_file = st.file_uploader("📄 Upload Template Word (.docx) dengan placeholder Jinja", type=["docx"], key="tpl_docx")
 
-    def prep_df_mitra(df_mitra_raw):
-        if df_mitra_raw is None or df_mitra_raw.empty:
-            return {}, {}
-        df = df_mitra_raw.copy()
+# # # Ambil data yang sudah diproses
+# # if "df_final" not in st.session_state or st.session_state["df_final"].empty:
+# #     st.info("Belum ada data kegiatan. Klik ▶️ Proses Data terlebih dahulu.")
+# # else:
+# #     df_all = st.session_state["df_final"].copy()
+# #     df_db = None
+# #     if "df_mitra" in st.session_state and not st.session_state["df_mitra"].empty:
+# #         df_db = st.session_state["df_mitra"].copy()
+# #     elif "df_mitra_belum" in st.session_state and not st.session_state["df_mitra_belum"].empty:
+# #         df_db = st.session_state["df_mitra_belum"].copy()  # fallback minimal
 
-        # Samakan nama kolom umum
-        if "Nama" in df.columns and "nama_lengkap" not in df.columns:
-            df.rename(columns={"Nama": "nama_lengkap"}, inplace=True)
-        if "NIK" in df.columns and "nik" not in df.columns:
-            df.rename(columns={"NIK": "nik"}, inplace=True)
+# #     # Pilihan bulan/sheet
+# #     sheet_opts = sorted(df_all["Sumber Sheet"].dropna().astype(str).unique().tolist())
+# #     bulan = st.selectbox("📅 Pilih Bulan/Sheet:", sheet_opts, index=0 if sheet_opts else None)
 
-        for c in ["nama_lengkap","nik","nama_pos","email","alamat_kec","alamat_desa","tgl_lahir","notelp"]:
-            if c not in df.columns:
-                df[c] = ""
+# #     # Filter kegiatan (opsional)
+# #     df_bulan = df_all[df_all["Sumber Sheet"] == bulan].copy()
+# #     keg_opts2 = ["(Semua)"] + sorted(df_bulan["Kegiatan"].dropna().astype(str).unique().tolist())
+# #     pilih_kegiatan2 = st.selectbox("🗂️ Pilih Kegiatan yg Diinginkan (opsional):", keg_opts2, index=0)
+# #     if pilih_kegiatan2 != "(Semua)":
+# #         df_bulan = df_bulan[df_bulan["Kegiatan"].astype(str) == pilih_kegiatan2]
 
-        df["nik_norm"]  = df["nik"].map(norm_nik)
-        df["nama_norm"] = df["nama_lengkap"].map(norm_nama)
+# #     # Normalisasi kolom nilai
+# #     if "Nilai" in df_bulan.columns:
+# #         df_bulan["Nilai"] = pd.to_numeric(df_bulan["Nilai"], errors="coerce").fillna(0)
 
-        # Buat dict lookup
-        by_nik  = {r["nik_norm"]: r for _, r in df.iterrows() if r.get("nik_norm")}
-        by_nama = {r["nama_norm"]: r for _, r in df.iterrows() if r.get("nama_norm")}
-        return by_nik, by_nama
+# #     # Kunci grup: utamakan NIK bila ada, jika tidak ada pakai Nama
+# #     use_nik = "NIK" in df_bulan.columns and df_bulan["NIK"].notna().any()
+# #     key_col = "NIK" if use_nik else "Nama"
 
-    by_nik, by_nama = prep_df_mitra(df_db)
+# #     # Multiselect mitra
+# #     daftar_mitra = sorted(df_bulan[key_col].dropna().astype(str).unique().tolist())
+# #     pilih_mitra = st.multiselect(f"👥 Pilih {key_col} untuk dibuatkan laporan (kosongkan untuk semua):", daftar_mitra, default=[])
 
-    def get_identitas_safety(nik_val, nama_val):
-        key_nik  = norm_nik(nik_val)
-        key_nama = norm_nama(nama_val)
-        row = None
-        if key_nik and key_nik in by_nik:   row = by_nik[key_nik]
-        elif key_nama and key_nama in by_nama: row = by_nama[key_nama]
+# #     # ===== Helper normalisasi & lookup identitas =====
+# #     def norm_nik(x):
+# #         if pd.isna(x): return ""
+# #         return "".join(c for c in str(x) if c.isdigit())
 
-        if row is None:
-            # fallback dari data kegiatan
-            return {
-                "nama_lengkap": nama_val or "",
-                "nik": nik_val or "",
-                "nama_pos": "",
-                "email": "",
-                "alamat_kec": "",
-                "alamat_desa": "",
-                "tgl_lahir": "",
-                "notelp": "",
-            }
-        else:
-            return {
-                "nama_lengkap": row.get("nama_lengkap",""),
-                "nik": row.get("nik",""),
-                "nama_pos": row.get("nama_pos",""),
-                "email": row.get("email",""),
-                "alamat_kec": row.get("alamat_kec",""),
-                "alamat_desa": row.get("alamat_desa",""),
-                "tgl_lahir": row.get("tgl_lahir",""),
-                "notelp": row.get("notelp",""),
-            }
+# #     def norm_nama(x):
+# #         if pd.isna(x): return ""
+# #         return " ".join(str(x).strip().split()).upper()
 
-    # ===== Tombol Generate DOCX =====
-    if st.button("🧾 Buat Laporan DOCX (ZIP)"):
-        if template_file is None:
-            st.warning("Upload template Word (.docx) terlebih dahulu.")
-        elif df_bulan.empty:
-            st.warning("Tidak ada data pada filter ini.")
-        else:
-            # Filter subset mitra (jika dipilih)
-            work = df_bulan.copy()
-            if pilih_mitra:
-                pilih_set = set([str(x) for x in pilih_mitra])
-                work = work[work[key_col].astype(str).isin(pilih_set)]
+# #     def hitung_umur(tgl):
+# #         t = pd.to_datetime(tgl, errors="coerce")
+# #         if pd.isna(t): 
+# #             return ""
+# #         today = date.today()   # ✅ sekarang bener
+# #         return today.year - t.year - ((today.month, today.day) < (t.month, t.day))
 
-            # Group per mitra
-            groups = work.groupby(key_col, dropna=True)
-            if groups.ngroups == 0:
-                st.info("Tidak ada mitra pada filter ini.")
-            else:
-                # Siapkan ZIP in-memory
-                zip_buf = io.BytesIO()
-                with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                    # generate satu per mitra
-                    for key_val, df_mitra_bln in groups:
-                        nama_val = df_mitra_bln["Nama"].iloc[0] if "Nama" in df_mitra_bln.columns else str(key_val)
-                        nik_val  = df_mitra_bln["NIK"].iloc[0]  if "NIK"  in df_mitra_bln.columns else (str(key_val) if key_col=="NIK" else "")
-                        ident = get_identitas_safety(nik_val, nama_val)
 
-                        # Susun daftar kegiatan
-                        rows = []
-                        total_nilai = 0
-                        for _, r in df_mitra_bln.iterrows():
-                            jad = fmt_tgl(r.get("Jadwal", ""))
-                            keg = str(r.get("Kegiatan", ""))
-                            vol = str(r.get("Volume", ""))
-                            nil = float(r.get("Nilai", 0)) if pd.notna(r.get("Nilai", 0)) else 0
-                            total_nilai += nil
-                            rows.append({
-                                "jadwal": jad,
-                                "nama": keg,
-                                "volume": vol,
-                                "nilai": fmt_rp(nil),
-                            })
+# #     def wa_format(no):
+# #         digits = "".join(c for c in str(no) if c.isdigit())
+# #         if not digits: return ""
+# #         if digits.startswith("0"):
+# #             digits = "62" + digits[1:]
+# #         elif digits.startswith("8"):
+# #             digits = "62" + digits
+# #         return f"https://wa.me/{digits}"
 
-                        context = {
-                            "bulan": bulan,
-                            "nama_lengkap": ident["nama_lengkap"],
-                            "nik": ident["nik"],
-                            "nama_pos": ident["nama_pos"],
-                            "email": ident["email"],
-                            "alamat_kec": ident["alamat_kec"],
-                            "alamat_desa": ident["alamat_desa"],
-                            "umur": hitung_umur(ident["tgl_lahir"]),
-                            "whatsapp": wa_format(ident["notelp"]),
-                            "kegiatan": rows,
-                            "total_nilai": fmt_rp(total_nilai),
-                        }
+# #     def fmt_rp(x):
+# #         try:
+# #             return f"Rp{int(float(x)):,}".replace(",", ".")
+# #         except:
+# #             return str(x)
 
-                        # Render docx dari template upload
-                        tpl = DocxTemplate(template_file)
-                        tpl.render(context)
+# #     def fmt_tgl(x):
+# #         t = pd.to_datetime(x, errors="coerce")
+# #         if pd.isna(t): return str(x)
+# #         return t.strftime("%d-%m-%Y")
 
-                        # Simpan ke buffer per-file, lalu tulis ke ZIP
-                        outfile_name = f"laporan_{(ident['nik'] or key_val)}_{bulan.replace(' ','_')}.docx"
-                        out_buf = io.BytesIO()
-                        tpl.save(out_buf)
-                        zf.writestr(outfile_name, out_buf.getvalue())
+# #     def prep_df_mitra(df_mitra_raw):
+# #         if df_mitra_raw is None or df_mitra_raw.empty:
+# #             return {}, {}
+# #         df = df_mitra_raw.copy()
 
-                st.success(f"Berhasil membuat laporan untuk {groups.ngroups} mitra.")
-                st.download_button(
-                    "⬇️ Download ZIP Laporan DOCX",
-                    data=zip_buf.getvalue(),
-                    file_name=f"Laporan_Mitra_{bulan.replace(' ','_')}.zip",
-                    mime="application/zip",
-                )
+# #         # Samakan nama kolom umum
+# #         if "Nama" in df.columns and "nama_lengkap" not in df.columns:
+# #             df.rename(columns={"Nama": "nama_lengkap"}, inplace=True)
+# #         if "NIK" in df.columns and "nik" not in df.columns:
+# #             df.rename(columns={"NIK": "nik"}, inplace=True)
+
+# #         for c in ["nama_lengkap","nik","nama_pos","email","alamat_kec","alamat_desa","tgl_lahir","notelp"]:
+# #             if c not in df.columns:
+# #                 df[c] = ""
+
+# #         df["nik_norm"]  = df["nik"].map(norm_nik)
+# #         df["nama_norm"] = df["nama_lengkap"].map(norm_nama)
+
+# #         # Buat dict lookup
+# #         by_nik  = {r["nik_norm"]: r for _, r in df.iterrows() if r.get("nik_norm")}
+# #         by_nama = {r["nama_norm"]: r for _, r in df.iterrows() if r.get("nama_norm")}
+# #         return by_nik, by_nama
+
+# #     by_nik, by_nama = prep_df_mitra(df_db)
+
+# #     def get_identitas_safety(nik_val, nama_val):
+# #         key_nik  = norm_nik(nik_val)
+# #         key_nama = norm_nama(nama_val)
+# #         row = None
+# #         if key_nik and key_nik in by_nik:   row = by_nik[key_nik]
+# #         elif key_nama and key_nama in by_nama: row = by_nama[key_nama]
+
+# #         if row is None:
+# #             # fallback dari data kegiatan
+# #             return {
+# #                 "nama_lengkap": nama_val or "",
+# #                 "nik": nik_val or "",
+# #                 "nama_pos": "",
+# #                 "email": "",
+# #                 "alamat_kec": "",
+# #                 "alamat_desa": "",
+# #                 "tgl_lahir": "",
+# #                 "notelp": "",
+# #             }
+# #         else:
+# #             return {
+# #                 "nama_lengkap": row.get("nama_lengkap",""),
+# #                 "nik": row.get("nik",""),
+# #                 "nama_pos": row.get("nama_pos",""),
+# #                 "email": row.get("email",""),
+# #                 "alamat_kec": row.get("alamat_kec",""),
+# #                 "alamat_desa": row.get("alamat_desa",""),
+# #                 "tgl_lahir": row.get("tgl_lahir",""),
+# #                 "notelp": row.get("notelp",""),
+# #             }
+
+# #     # ===== Tombol Generate DOCX =====
+# #     if st.button("🧾 Buat Laporan DOCX (ZIP)"):
+# #         if template_file is None:
+# #             st.warning("Upload template Word (.docx) terlebih dahulu.")
+# #         elif df_bulan.empty:
+# #             st.warning("Tidak ada data pada filter ini.")
+# #         else:
+# #             # Filter subset mitra (jika dipilih)
+# #             work = df_bulan.copy()
+# #             if pilih_mitra:
+# #                 pilih_set = set([str(x) for x in pilih_mitra])
+# #                 work = work[work[key_col].astype(str).isin(pilih_set)]
+
+# #             # Group per mitra
+# #             groups = work.groupby(key_col, dropna=True)
+# #             if groups.ngroups == 0:
+# #                 st.info("Tidak ada mitra pada filter ini.")
+# #             else:
+# #                 # Siapkan ZIP in-memory
+# #                 zip_buf = io.BytesIO()
+# #                 with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+# #                     # generate satu per mitra
+# #                     for key_val, df_mitra_bln in groups:
+# #                         nama_val = df_mitra_bln["Nama"].iloc[0] if "Nama" in df_mitra_bln.columns else str(key_val)
+# #                         nik_val  = df_mitra_bln["NIK"].iloc[0]  if "NIK"  in df_mitra_bln.columns else (str(key_val) if key_col=="NIK" else "")
+# #                         ident = get_identitas_safety(nik_val, nama_val)
+
+# #                         # Susun daftar kegiatan
+# #                         rows = []
+# #                         total_nilai = 0
+# #                         for _, r in df_mitra_bln.iterrows():
+# #                             jad = fmt_tgl(r.get("Jadwal", ""))
+# #                             keg = str(r.get("Kegiatan", ""))
+# #                             vol = str(r.get("Volume", ""))
+# #                             nil = float(r.get("Nilai", 0)) if pd.notna(r.get("Nilai", 0)) else 0
+# #                             total_nilai += nil
+# #                             rows.append({
+# #                                 "jadwal": jad,
+# #                                 "nama": keg,
+# #                                 "volume": vol,
+# #                                 "nilai": fmt_rp(nil),
+# #                             })
+
+# #                         context = {
+# #                             "bulan": bulan,
+# #                             "nama_lengkap": ident["nama_lengkap"],
+# #                             "nik": ident["nik"],
+# #                             "nama_pos": ident["nama_pos"],
+# #                             "email": ident["email"],
+# #                             "alamat_kec": ident["alamat_kec"],
+# #                             "alamat_desa": ident["alamat_desa"],
+# #                             "umur": hitung_umur(ident["tgl_lahir"]),
+# #                             "whatsapp": wa_format(ident["notelp"]),
+# #                             "kegiatan": rows,
+# #                             "total_nilai": fmt_rp(total_nilai),
+# #                         }
+
+# #                         # Render docx dari template upload
+# #                         tpl = DocxTemplate(template_file)
+# #                         tpl.render(context)
+
+# #                         # Simpan ke buffer per-file, lalu tulis ke ZIP
+# #                         outfile_name = f"laporan_{(ident['nik'] or key_val)}_{bulan.replace(' ','_')}.docx"
+# #                         out_buf = io.BytesIO()
+# #                         tpl.save(out_buf)
+# #                         zf.writestr(outfile_name, out_buf.getvalue())
+
+# #                 st.success(f"Berhasil membuat laporan untuk {groups.ngroups} mitra.")
+# #                 st.download_button(
+# #                     "⬇️ Download ZIP Laporan DOCX",
+# #                     data=zip_buf.getvalue(),
+# #                     file_name=f"Laporan_Mitra_{bulan.replace(' ','_')}.zip",
+# #                     mime="application/zip",
+# #                 )

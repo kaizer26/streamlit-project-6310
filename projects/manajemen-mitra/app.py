@@ -177,6 +177,7 @@ def login_sso(username, password):
 
 
 # === STREAMLIT UI ===
+st.set_page_config(page_title="📊 Dashboard Rekap Mitra per Kegiatan BPS", layout="wide")
 st.title("📊 Dashboard Rekap Mitra per Kegiatan BPS")
 st.caption("Scraping otomatis data mitra BPS (Kabupaten Tanah Bumbu)")
 
@@ -317,13 +318,52 @@ if not survei_df.empty:
                 if not detail_df.empty:
                     st.dataframe(detail_df)
                     st.success(f"🎯 Total {len(detail_df)} mitra ditemukan.")
-
+                    # 🔹 Daftar kolom yang ingin diekspor
+                    kolom_dipilih = [
+                        "id_ms", "kd_survei", "id_kegiatan", "id_posisi", "nama_pos",
+                        "id_mitra", "kd_prov", "kd_kab", "status", "ket_status",
+                        "kd_mitra", "id_posisi_daftar", "nama_pos_daftar", "sobat_id",
+                        "ijazah", "is_ujian", "CreatedBy", "CreatedAt", "UpdatedBy", "UpdatedAt",
+                        "mitra_detail.id_mitra", "mitra_detail.nik", "mitra_detail.nama_lengkap",
+                        "mitra_detail.email", "mitra_detail.npwp", "mitra_detail.username",
+                        "mitra_detail.alamat_detail", "mitra_detail.alamat_prov",
+                        "mitra_detail.alamat_kab", "mitra_detail.alamat_kec",
+                        "mitra_detail.alamat_desa", "mitra_detail.tgl_lahir",
+                        "mitra_detail.jns_kelamin", "mitra_detail.agama", "mitra_detail.status_kawin",
+                        "mitra_detail.pendidikan", "mitra_detail.pekerjaan", "mitra_detail.desc_pekerjaan_lain",
+                        "mitra_detail.no_telp", "mitra_detail.foto", "mitra_detail.foto_ktp",
+                        "mitra_detail.catatan", "mitra_detail.is_pegawai", "mitra_detail.sobat_id",
+                        "mitra_detail.ijazah", "mitra_detail.is_capi", "mitra_detail.is_motor",
+                        "mitra_detail.is_naik_motor", "mitra_detail.is_hp_android",
+                        "mitra_detail.is_kl_lain", "mitra_detail.nama_kl", "mitra_detail.keterangan_kl",
+                        "mitra_detail.is_bisa_komputer", "mitra_detail.is_laptop",
+                        "mitra_detail.is_ujian", "mitra_detail.CreatedBy",
+                        "mitra_detail.CreatedAt", "mitra_detail.UpdatedBy", "mitra_detail.UpdatedAt",
+                        "nama_survei", "id_keg", "nama_keg"
+                    ]
+                    # 🔹 Hanya ambil kolom yang tersedia (untuk menghindari error jika ada kolom hilang)
+                    kolom_tersedia = [k for k in kolom_dipilih if k in detail_df.columns]
+                    export_df = detail_df[kolom_tersedia]
+                    
                     tanggalsekarang = time.strftime("%Y%m%d")
-                    filename = f"{tanggalsekarang} - Daftar Mitra - {selected_row['nama_keg']}.xlsx"
+                    filename = f"{tanggalsekarang} - Daftar Mitra - {selected_row['nama_keg']} - Full.xlsx"
+                    filename1 = f"{tanggalsekarang} - Daftar Mitra - {selected_row['nama_keg']} - 2.xlsx"
                     detail_df.to_excel(filename, index=False)
+                    # 🔹 Simpan ke buffer Excel tanpa buat file fisik
+                    from io import BytesIO
+                    buffer = BytesIO()
+                    export_df.to_excel(buffer, index=False, engine='openpyxl')
+                    buffer.seek(0)
 
+                    # 🔹 Tombol download
                     st.download_button(
-                        label="💾 Download Daftar Mitra",
+                        label="💾 Download Daftar Mitra (Excel)",
+                        data=buffer,
+                        file_name=filename1,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    st.download_button(
+                        label="💾 Download Daftar Mitra (Full)",
                         data=open(filename, "rb"),
                         file_name=filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
