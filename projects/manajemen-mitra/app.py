@@ -13,6 +13,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
+from multiprocessing import Pool, cpu_count
+from functools import partial
+from tqdm import tqdm
+
 
 # === Konfigurasi dasar ===
 KEY_ID = '687e204db62094de46edbcd7ed7cb204'
@@ -66,26 +70,100 @@ def safe_request(url, headers, max_retries=3, timeout=15):
         time.sleep(2 * (attempt + 1))
     return None
 
-# === Fungsi ambil_detail_kegiatan dengan kode wilayah dinamis ===
-def ambil_detail_kegiatan(row, headers, kode_prov, kode_kab):
+def worker_detail_mitra(id_mitra, headers):
+    try:
+        url = f'https://mitra-api.bps.go.id/api/mitra/id/{id_mitra}'
+        resp = safe_request(url, headers)
+
+        if resp and resp.status_code == 200 and resp.json():
+            df = pd.json_normalize(resp.json())
+            df['id_mitra'] = id_mitra
+            return df
+    except:
+        pass
+    return pd.DataFrame()
+
+
+def ambil_detail_mitra(id_mitra, headers):
+    """Ambil detail satu mitra berdasarkan ID"""
+    url = f'https://mitra-api.bps.go.id/api/mitra/id/{id_mitra}'
+    resp = safe_request(url, headers)
+
+    if resp and resp.status_code == 200 and resp.json():
+        try:
+            return pd.json_normalize(resp.json())
+        except:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+
+SEMUA_KOLOM = set()
+def ambil_detail_kegiatan(row, headers, kode_prov, kode_kab, versi=3):
     kd_survei = row['kd_survei']
     id_keg = row['id_keg']
     nama_survei = row['nama_survei']
     nama_keg = row['nama_keg']
 
-    url = f'https://mitra-api.bps.go.id/api/mitra/listv3/{kd_survei}/{id_keg}/{kode_prov}/{kode_kab}'
+    # Endpoint list
+    if versi == 3:
+        url = f'https://mitra-api.bps.go.id/api/mitra/listv3/{kd_survei}/{id_keg}/{kode_prov}/{kode_kab}'
+    else:
+        url = f'https://mitra-api.bps.go.id/api/mitra/listv4/{kd_survei}/{id_keg}/{kode_prov}/{kode_kab}'
+
     resp = safe_request(url, headers)
 
-    if resp and resp.status_code == 200 and resp.json():
-        res = resp.json()
-        detail = pd.json_normalize(res)
-        detail['kd_survei'] = kd_survei
-        detail['nama_survei'] = nama_survei
-        detail['id_keg'] = id_keg
-        detail['nama_keg'] = nama_keg
-        return detail
-    return pd.DataFrame()
+    if not (resp and resp.status_code == 200 and resp.json()):
+        return pd.DataFrame()
 
+    list_mitra = pd.json_normalize(resp.json())
+
+    # metadata kegiatan
+    list_mitra['kd_survei'] = kd_survei
+    list_mitra['nama_survei'] = nama_survei
+    list_mitra['id_keg'] = id_keg
+    list_mitra['nama_keg'] = nama_keg
+
+    # Ambil id_mitra
+    list_id = list_mitra.get('id_mitra', list_mitra.get('id')).tolist()
+
+    if not list_id:
+        return pd.DataFrame()
+
+    # =========================================================
+    #   MULTIPROCESSING + tqdm
+    # =========================================================
+    worker = partial(worker_detail_mitra, headers=headers)
+
+    total_cpu = max(cpu_count() - 1, 1)
+
+    with Pool(total_cpu) as pool:
+        detail_list = list(
+            tqdm(pool.imap(worker, list_id), 
+                 total=len(list_id), 
+                 desc=f"Ambil detail mitra {nama_keg}")
+        )
+
+    # Buang yang kosong
+    detail_list = [d for d in detail_list if not d.empty]
+
+    if not detail_list:
+        return pd.DataFrame()
+
+    # Merge seluruh detail
+    df_detail = pd.concat(detail_list, ignore_index=True)
+
+    # Merge metadata kegiatan
+    df_merged = df_detail.merge(list_mitra, on='id_mitra', how='left')
+
+    # Pastikan semua kolom lengkap
+    global SEMUA_KOLOM
+    SEMUA_KOLOM.update(df_merged.columns)
+
+    for kol in SEMUA_KOLOM:
+        if kol not in df_merged.columns:
+            df_merged[kol] = ""
+
+    return df_merged
 
 # === Fungsi ambil_kegiatan dengan kode wilayah dinamis ===
 def ambil_kegiatan(row, headers, kode_prov, kode_kab):
@@ -117,6 +195,17 @@ def ambil_kegiatan(row, headers, kode_prov, kode_kab):
     if semua_kegiatan:
         return pd.concat(semua_kegiatan, ignore_index=True)
     return pd.DataFrame()
+
+@st.cache_data(show_spinner=False)
+def ambil_detail_kegiatan_cached(row_dict, headers, kode_prov, kode_kab, versi=3):
+    row = pd.Series(row_dict)
+    return ambil_detail_kegiatan(row, headers, kode_prov, kode_kab, versi)
+
+
+@st.cache_data(show_spinner=False)
+def ambil_kegiatan_cached(selected_survei_dict, headers, kode_prov, kode_kab):
+    selected_survei = pd.Series(selected_survei_dict)
+    return ambil_kegiatan(selected_survei, headers, kode_prov, kode_kab)
 
 
 # === Fungsi login ===
@@ -231,8 +320,8 @@ else:
     st.session_state["kode_prov"] = kode_prov
     st.session_state["kode_kab"] = kode_kab
 
-    username = st.text_input("👤 Username SSO")
-    password = st.text_input("🔒 Password SSO", type="password")
+    username = st.text_input("👤 Username SSO", value="vivi.cantika")
+    password = st.text_input("🔒 Password SSO", value="Vivi2405", type="password")
     if st.button("🚀 Login & Jalankan Scraping"):
         with st.spinner("Login ke SSO dan mengambil token..."):
             token = login_sso(username, password)
@@ -287,9 +376,13 @@ if not survei_df.empty:
 
         # Ambil kegiatan HANYA untuk survei ini
         with st.spinner("🔍 Mengambil daftar kegiatan..."):
-            kegiatan_df = ambil_kegiatan(selected_survei, headers, 
-    st.session_state.get("kode_prov", "63"), 
-    st.session_state.get("kode_kab", "10"))
+            selected_survei_dict = selected_survei.to_dict()
+
+            kegiatan_df = ambil_kegiatan_cached(
+                selected_survei_dict, headers,
+                st.session_state.get("kode_prov", "63"),
+                st.session_state.get("kode_kab", "10"),
+            )
 
         if not kegiatan_df.empty:
             # st.success(f"✅ Ditemukan {len(kegiatan_df)} kegiatan untuk survei {selected_survei['nama']}.")
@@ -311,51 +404,184 @@ if not survei_df.empty:
                 # st.info(f"📄 Mengambil mitra untuk kegiatan: **{selected_row['nama_keg']}**")
 
                 with st.spinner("🧩 Mengambil daftar mitra..."):
-                    detail_df = ambil_detail_kegiatan(selected_row, headers, 
-    st.session_state.get("kode_prov", "63"), 
-    st.session_state.get("kode_kab", "10"))
+                    selected_row_dict = selected_row.to_dict()
 
-                if not detail_df.empty:
-                    st.dataframe(detail_df)
-                    st.success(f"🎯 Total {len(detail_df)} mitra ditemukan.")
+                    detail_df_v3 = ambil_detail_kegiatan_cached(
+                        selected_row_dict, headers,
+                        st.session_state.get("kode_prov", "63"),
+                        st.session_state.get("kode_kab", "10"),
+                        versi=3
+                    )
+
+                    detail_df_v4 = ambil_detail_kegiatan_cached(
+                        selected_row_dict, headers,
+                        st.session_state.get("kode_prov", "63"),
+                        st.session_state.get("kode_kab", "10"),
+                        versi=4
+                    )                   
+
+                if not detail_df_v3.empty and not detail_df_v4.empty:
+                    st.dataframe(detail_df_v3)
+                    st.success(f"🎯 Total {len(detail_df_v3)} mitra ditemukan.")
                     # 🔹 Daftar kolom yang ingin diekspor
                     kolom_dipilih = [
-                        "id_ms", "kd_survei", "id_kegiatan", "id_posisi", "nama_pos",
-                        "id_mitra", "kd_prov", "kd_kab", "status", "ket_status",
-                        "kd_mitra", "id_posisi_daftar", "nama_pos_daftar", "sobat_id",
-                        "ijazah", "is_ujian", "CreatedBy", "CreatedAt", "UpdatedBy", "UpdatedAt",
-                        "mitra_detail.id_mitra", "mitra_detail.nik", "mitra_detail.nama_lengkap",
-                        "mitra_detail.email", "mitra_detail.npwp", "mitra_detail.username",
-                        "mitra_detail.alamat_detail", "mitra_detail.alamat_prov",
-                        "mitra_detail.alamat_kab", "mitra_detail.alamat_kec",
-                        "mitra_detail.alamat_desa", "mitra_detail.tgl_lahir",
-                        "mitra_detail.jns_kelamin", "mitra_detail.agama", "mitra_detail.status_kawin",
-                        "mitra_detail.pendidikan", "mitra_detail.pekerjaan", "mitra_detail.desc_pekerjaan_lain",
-                        "mitra_detail.no_telp", "mitra_detail.foto", "mitra_detail.foto_ktp",
-                        "mitra_detail.catatan", "mitra_detail.is_pegawai", "mitra_detail.sobat_id",
-                        "mitra_detail.ijazah", "mitra_detail.is_capi", "mitra_detail.is_motor",
-                        "mitra_detail.is_naik_motor", "mitra_detail.is_hp_android",
-                        "mitra_detail.is_kl_lain", "mitra_detail.nama_kl", "mitra_detail.keterangan_kl",
-                        "mitra_detail.is_bisa_komputer", "mitra_detail.is_laptop",
-                        "mitra_detail.is_ujian", "mitra_detail.CreatedBy",
-                        "mitra_detail.CreatedAt", "mitra_detail.UpdatedBy", "mitra_detail.UpdatedAt",
-                        "nama_survei", "id_keg", "nama_keg"
+                        "mitra_detail.nik",
+                        "mitra_detail.nama_lengkap",
+                        "mitra_detail.email",
+                        "ket_status",
+                        "nama_pos_daftar",
+                        "id_mitra",
+                        "mitra_detail.npwp",
+                        "mitra_detail.username",
+                        "mitra_detail.alamat_detail",
+                        "mitra_detail.alamat_prov",
+                        "mitra_detail.alamat_kab",
+                        "mitra_detail.alamat_kec",
+                        "mitra_detail.alamat_desa",
+                        "mitra_detail.tgl_lahir",
+                        "mitra_detail.jns_kelamin",
+                        "mitra_detail.agama",
+                        "mitra_detail.status_kawin",
+                        "mitra_detail.pendidikan",
+                        "mitra_detail.pekerjaan",
+                        "mitra_detail.desc_pekerjaan_lain",
+                        "mitra_detail.no_telp",
+                        "mitra_detail.foto",
+                        "mitra_detail.foto_ktp",
+                        "mitra_detail.catatan",
+                        "mitra_detail.is_pegawai",
+                        "mitra_detail.sobat_id",
+                        "mitra_detail.ijazah",
+                        "mitra_detail.is_capi",
+                        "mitra_detail.is_motor",
+                        "mitra_detail.is_naik_motor",
+                        "mitra_detail.is_hp_android",
+                        "mitra_detail.is_kl_lain",
+                        "mitra_detail.nama_kl",
+                        "mitra_detail.keterangan_kl",
+                        "mitra_detail.is_bisa_komputer",
+                        "mitra_detail.is_laptop",
+                        "mitra_detail.is_ujian",
+                        "nama_survei",
+                        "id_keg",
+                        "nama_keg",
                     ]
+                    
+                    kolom_dipilih1 = [
+                        "mitra_detail.nik",
+                        "mitra_detail.nama_lengkap",
+                        "mitra_detail.email",
+                        "nama_pos_daftar",
+                        "ket_status",
+                        "skor",
+                        "tes_start",
+                        "tes_end",
+                        "agreement_status",]
+                    
+                    kolom_dipilih2 = [
+                        "mitra.idmitra",
+                        "mitra.nik",
+                        "mitra.nama_lengkap",
+                        "mitra.email",
+                        "mitra.username",
+                        "mitra.status",
+                        "mitra.npwp",
+                        "mitra.alamat_detail",
+                        "mitra.alamat_prov",
+                        "mitra.alamat_kab",
+                        "mitra.alamat_kec",
+                        "mitra.alamat_desa",
+                        "mitra.alamat_is",
+                        "mitra.tgl_lahir",
+                        "mitra.jns_kelamin",
+                        "mitra.agama",
+                        "mitra.status_kawin",
+                        "mitra.pendidikan",
+                        "mitra.pekerjaan",
+                        "mitra.desc_pekerjaan_lain",
+                        "mitra.no_telp",
+                        "mitra.is_pendataan_bps",
+                        "mitra.is_sp",
+                        "mitra.is_st",
+                        "mitra.is_se",
+                        "mitra.is_susenas",
+                        "mitra.is_sakernas",
+                        "mitra.is_sbh",
+                        "mitra.foto",
+                        "mitra.foto_ktp",
+                        "mitra.catatan",
+                        "mitra.is_agree",
+                        "mitra.is_complete",
+                        "mitra.sobat_id",
+                        "mitra.ijazah",
+                        "mitra.is_capi",
+                        "mitra.is_motor",
+                        "mitra.is_naik_motor",
+                        "mitra.is_hp_android",
+                        "mitra.is_kl_lain",
+                        "mitra.nama_kl",
+                        "mitra.keterangan_kl",
+                        "mitra.kd_bank",
+                        "mitra.rekening",
+                        "mitra.kd_prov_lahir",
+                        "mitra.kd_kab_lahir",
+                        "mitra.is_bisa_komputer",
+                        "mitra.is_laptop",
+                        "mitra.merk_hp",
+                        "mitra.tipe_hp",
+                        "mitra.ram_hp",
+                        "mitra.lahir_ln",
+                        "mitra.lahir_tempat_ln",
+                        "mitra.rekening_nama",
+                        "mitra.is_ujian",
+                        "id_mitra",
+                        "id_ms",
+                        "kd_survei",
+                        "id_kegiatan",
+                        "id_posisi",
+                        "nama_pos",
+                        "kd_prov",
+                        "kd_kab",
+                        "status",
+                        "ket_status",
+                        "kd_mitra",
+                        "id_posisi_daftar",
+                        "nama_pos_daftar",
+                        "nama_survei",
+                        "id_keg",
+                        "nama_keg",
+
+                    ]
+                    
                     # 🔹 Hanya ambil kolom yang tersedia (untuk menghindari error jika ada kolom hilang)
-                    kolom_tersedia = [k for k in kolom_dipilih if k in detail_df.columns]
-                    export_df = detail_df[kolom_tersedia]
+                    kolom_tersedia = [k for k in kolom_dipilih if k in detail_df_v3.columns]
+                    kolom_tersedia2 = [k for k in kolom_dipilih2 if k in detail_df_v3.columns]
+                                                
+                    export_df = detail_df_v3[kolom_tersedia]
+                    export_df1 = detail_df_v4.reindex(columns=kolom_dipilih1, fill_value="")
                     
                     tanggalsekarang = time.strftime("%Y%m%d")
                     filename = f"{tanggalsekarang} - Daftar Mitra - {selected_row['nama_keg']} - Full.xlsx"
                     filename1 = f"{tanggalsekarang} - Daftar Mitra - {selected_row['nama_keg']} - 2.xlsx"
-                    detail_df.to_excel(filename, index=False)
+                    filename2 = f"{tanggalsekarang} - Daftar Mitra - {selected_row['nama_keg']} - (Seleksi).xlsx"
+                    
+                    detail_df_v3.to_excel(filename, index=False)
                     # 🔹 Simpan ke buffer Excel tanpa buat file fisik
                     from io import BytesIO
                     buffer = BytesIO()
+                    buffer1 = BytesIO()
                     export_df.to_excel(buffer, index=False, engine='openpyxl')
                     buffer.seek(0)
+                    export_df1.to_excel(buffer1, index=False, engine='openpyxl')
+                    buffer1.seek(0)
 
                     # 🔹 Tombol download
+                    st.download_button(
+                        label="💾 Download Daftar Mitra Seleksi (Excel)",
+                        data=buffer1,
+                        file_name=filename2,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
                     st.download_button(
                         label="💾 Download Daftar Mitra (Excel)",
                         data=buffer,
